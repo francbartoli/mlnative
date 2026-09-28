@@ -99,7 +99,7 @@ class TestFitBounds:
         """Bounds input accepts common list shapes from JSON/request parsing."""
         m = Map(width=512, height=512)
         center, zoom = m.fit_bounds([-122.5, 37.7, -122.3, 37.9])
-        assert center == pytest.approx([-122.4, 37.8])
+        assert (center, zoom) == m.fit_bounds((-122.5, 37.7, -122.3, 37.9))
         assert zoom > 0
 
     def test_fit_bounds_rejects_negative_padding(self):

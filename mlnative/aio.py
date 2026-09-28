@@ -20,11 +20,14 @@ from typing import Any, Literal, overload
 from ._bridge import PROTOCOL_VERSION, STDERR_BUFFER_LINES, _get_timeout, get_binary_path
 from .exceptions import MlnativeError
 from .map import (
+    MAX_ZOOM,
+    Bounds,
     Center,
     _normalize_view,
     _serialize_style,
     _validate_dimension,
     _validate_pixel_ratio,
+    fit_bounds,
 )
 
 logger = logging.getLogger(__name__)
@@ -187,6 +190,12 @@ class AsyncRenderer:
         text = _serialize_style(style)
         await self._call({"cmd": "reload_style", "style": text})
         self._style = text
+
+    def fit_bounds(
+        self, bounds: Bounds, *, padding: int = 0, max_zoom: float = MAX_ZOOM
+    ) -> tuple[list[float], float]:
+        """The centre and zoom that fit ``bounds`` at the current size; see :func:`fit_bounds`."""
+        return fit_bounds(bounds, self._size[0], self._size[1], padding=padding, max_zoom=max_zoom)
 
     async def aclose(self) -> None:
         """Ask the process to quit, and kill it if it has not within five seconds."""

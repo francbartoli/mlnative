@@ -223,5 +223,5 @@ class TestFitBoundsIntegration:
         assert center1[0] == pytest.approx(center2[0], abs=0.001)
         assert center1[1] == pytest.approx(center2[1], abs=0.001)
 
-        # Zoom2 should be 1 level lower (log2(2) = 1)
-        assert zoom2 == pytest.approx(zoom1 - 1.0, abs=0.01)
+        # Width and height are logical pixels: the zoom does not depend on the ratio
+        assert zoom2 == pytest.approx(zoom1, abs=0.01)

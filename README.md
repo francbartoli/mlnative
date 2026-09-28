@@ -212,6 +212,11 @@ center, zoom = m.fit_bounds((xmin, ymin, xmax, ymax))
 png = m.render(center=center, zoom=zoom)
 ```
 
+The centre is the Web Mercator midpoint of the bounds and the zoom counts
+MapLibre's 512-pixel world, so the bounds touch the padding on the side that
+limits them. `mlnative.fit_bounds(bounds, width, height)` computes the same
+camera without a `Map`.
+
 ### set_geojson(source_id, geojson)
 
 Update GeoJSON source in style (requires dict style, not URL).
@@ -270,7 +275,7 @@ The `pixel_ratio` parameter controls the resolution of the output image:
 - Higher `pixel_ratio` = larger output image
 - Same geographic area shown regardless of pixel_ratio
 - Text and icons scale properly (sharper, not smaller)
-- fit_bounds() automatically accounts for pixel_ratio
+- fit_bounds() gives the same camera at any pixel_ratio, since sizes are logical pixels
 
 ### Other notes
 

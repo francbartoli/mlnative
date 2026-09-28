@@ -16,7 +16,7 @@ from .geo import (
     from_latlng,
     point,
 )
-from .map import Bounds, Center, Map, RenderView
+from .map import Bounds, Center, Map, RenderView, fit_bounds
 
 __version__ = version("mlnative")
 __all__ = [
@@ -29,6 +29,7 @@ __all__ = [
     "RenderView",
     "bounds_to_polygon",
     "feature_collection",
+    "fit_bounds",
     "from_coordinates",
     "from_latlng",
     "get_binary_path",

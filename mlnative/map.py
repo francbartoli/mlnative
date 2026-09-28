@@ -149,6 +149,54 @@ def _normalize_bounds(bounds: Bounds) -> tuple[float, float, float, float]:
     return xmin, ymin, xmax, ymax
 
 
+TILE_SIZE = 512
+"""The width of the world at zoom 0 in MapLibre, in logical pixels."""
+
+
+def _lat_to_y(lat: float) -> float:
+    """Web Mercator y of a latitude, in radians."""
+    return math.log(math.tan(math.pi / 4 + math.radians(lat) / 2))
+
+
+def fit_bounds(
+    bounds: Bounds,
+    width: int,
+    height: int,
+    *,
+    padding: int = 0,
+    max_zoom: float = MAX_ZOOM,
+) -> tuple[list[float], float]:
+    """The centre and zoom that show ``bounds`` inside a ``width`` by ``height`` map.
+
+    The centre is the Web Mercator midpoint of the bounds, and the zoom counts
+    MapLibre's 512-pixel world, so the bounds touch the padding on the side
+    that limits them. Sizes are logical pixels: the pixel ratio changes the
+    resolution of the image, not what it shows.
+    """
+    xmin, ymin, xmax, ymax = _normalize_bounds(bounds)
+    if padding < 0:
+        raise MlnativeError(f"Padding must be non-negative, got {padding}")
+    if not (0 <= max_zoom <= MAX_ZOOM):
+        raise MlnativeError(f"max_zoom must be 0-{MAX_ZOOM}, got {max_zoom}")
+    inner_width, inner_height = width - 2 * padding, height - 2 * padding
+    if inner_width <= 0 or inner_height <= 0:
+        raise MlnativeError(f"Padding too large for map size {width}x{height}")
+    if xmin == xmax and ymin == ymax:
+        return [xmin, ymin], min(14.0, max_zoom)
+    try:
+        y_min, y_max = _lat_to_y(ymin), _lat_to_y(ymax)
+    except ValueError as e:
+        raise MlnativeError("Bounds cannot be projected in Web Mercator") from e
+    center_lat = math.degrees(2 * math.atan(math.exp((y_min + y_max) / 2)) - math.pi / 2)
+    zooms = [float(max_zoom)]
+    x_span = math.radians(xmax - xmin)
+    if x_span > 0:
+        zooms.append(math.log2(inner_width * 2 * math.pi / (x_span * TILE_SIZE)))
+    if y_max > y_min:
+        zooms.append(math.log2(inner_height * 2 * math.pi / ((y_max - y_min) * TILE_SIZE)))
+    return [(xmin + xmax) / 2, center_lat], max(0.0, min(zooms))
+
+
 def _load_style_file(path: Path) -> dict[str, Any]:
     """Load style JSON from a local file path."""
     if not path.exists():
@@ -386,92 +434,10 @@ class Map:
         padding: int = 0,
         max_zoom: float = MAX_ZOOM,
     ) -> tuple[list[float], float]:
-        """Calculate center and zoom to fit geographic bounds.
-
-        Uses spherical mercator projection to calculate the optimal zoom level
-        for displaying the given bounds within the map dimensions.
-
-        Args:
-            bounds: (xmin, ymin, xmax, ymax) bounding box in degrees
-            padding: Padding in pixels to add around the bounds (default 0)
-            max_zoom: Maximum zoom level to use (default 24)
-
-        Returns:
-            Tuple of (center, zoom) where center is [lon, lat] and zoom is float.
-            Pass these directly to render():
-                center, zoom = map.fit_bounds(bounds)
-                png = map.render(center=center, zoom=zoom)
-
-        Example:
-            # Fit to bounds of San Francisco Bay Area
-            bounds = (-122.6, 37.7, -122.3, 37.9)  # xmin, ymin, xmax, ymax
-            center, zoom = map.fit_bounds(bounds, padding=50)
-            png = map.render(center=center, zoom=zoom)
-
-        Raises:
-            MlnativeError: If bounds are invalid
-        """
+        """Calculate center and zoom to fit geographic bounds; see :func:`fit_bounds`."""
         if self._closed:
             raise MlnativeError("Map has been closed")
-
-        xmin, ymin, xmax, ymax = _normalize_bounds(bounds)
-
-        if padding < 0:
-            raise MlnativeError(f"Padding must be non-negative, got {padding}")
-        if not (0 <= max_zoom <= MAX_ZOOM):
-            raise MlnativeError(f"max_zoom must be 0-{MAX_ZOOM}, got {max_zoom}")
-
-        # Calculate center
-        center_lon = (xmin + xmax) / 2
-        center_lat = (ymin + ymax) / 2
-
-        # Handle single point case (bounds are a point, not an area)
-        if xmin == xmax and ymin == ymax:
-            # For a single point, use a sensible default zoom
-            return [center_lon, center_lat], min(14.0, max_zoom)
-
-        # Calculate zoom using spherical mercator projection
-        # Convert lat/lon to mercator meters
-        def lat_to_y(lat: float) -> float:
-            """Convert latitude to spherical mercator Y coordinate."""
-            lat_rad = math.radians(lat)
-            return math.log(math.tan(lat_rad / 2 + math.pi / 4))
-
-        try:
-            # Get bounds in mercator space
-            y_min = lat_to_y(ymin)
-            y_max = lat_to_y(ymax)
-        except ValueError as e:
-            raise MlnativeError("Bounds cannot be projected in Web Mercator") from e
-
-        # Longitude spans linearly in mercator
-        x_range = xmax - xmin
-        y_range = abs(y_max - y_min)
-
-        # Account for padding
-        width = self.width - 2 * padding
-        height = self.height - 2 * padding
-
-        if width <= 0 or height <= 0:
-            raise MlnativeError(f"Padding too large for map size {self.width}x{self.height}")
-
-        # Calculate zoom for each dimension
-        # At zoom 0, the world is 256x256 pixels
-        # Each zoom level doubles the resolution
-        x_zoom = math.inf if x_range == 0 else math.log2((width * 360) / (x_range * 256))
-        y_zoom = math.inf if y_range == 0 else math.log2((height * 2 * math.pi) / (y_range * 256))
-
-        # Use the smaller zoom to ensure bounds fit in both dimensions
-        zoom = min(x_zoom, y_zoom, max_zoom)
-
-        # Adjust for pixel_ratio: higher pixel_ratio means we need lower zoom
-        # to show the same geographic area (pixel_ratio=2 shows 2x less area at same zoom)
-        zoom = zoom - math.log2(self.pixel_ratio)
-
-        # Clamp to valid zoom range
-        zoom = max(0.0, min(float(zoom), MAX_ZOOM))
-
-        return [center_lon, center_lat], zoom
+        return fit_bounds(bounds, self.width, self.height, padding=padding, max_zoom=max_zoom)
 
     def set_geojson(
         self,
