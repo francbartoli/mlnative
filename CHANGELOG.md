@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0.dev1] - 2026-09-28
+
+### Added
+
+- Protocol 2.1: a render command can resize the map (`width`, `height`) and answer raw RGBA (`output: "rgba"`).
+- `AsyncRenderer` and `RawImage`: an asyncio interface to the renderer process.
+- `fit_bounds()` as a module function, also used by `Map.fit_bounds` and `AsyncRenderer.fit_bounds`.
+
+### Fixed
+
+- `fit_bounds` centres on the Web Mercator midpoint, counts MapLibre's 512-pixel world and gives the same camera at any pixel ratio.
+- A renderer process killed on cancellation is reaped on the loop, so its pipes are closed before the loop is.
+
+### Changed
+
+- Wheels are tagged `manylinux_2_39`, the glibc of the Ubuntu 24.04 runners that build them; the runners are pinned.
+- Releases go to this fork's GitHub releases only.
+
 ## [0.3.13] - 2026-06-09
 
 ### Added

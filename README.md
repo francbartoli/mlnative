@@ -16,6 +16,9 @@ Uses the [maplibre-native](https://crates.io/crates/maplibre-native) Rust crate 
 pip install mlnative
 ```
 
+This fork publishes its wheels on its GitHub releases only; install one by URL, for example
+`uv pip install https://github.com/francbartoli/mlnative/releases/download/v0.4.0.dev1/mlnative-0.4.0.dev1-py3-none-manylinux_2_39_x86_64.whl`.
+
 Check the local install and native renderer binary:
 
 ```bash

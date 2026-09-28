@@ -176,7 +176,9 @@ def test_release_workflow_attest_action_is_digest_pinned():
     """Release provenance attestations should use pinned action digests."""
     source = (ROOT / ".github/workflows/release.yml").read_text()
     pinned = "actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32"
-    assert source.count(pinned) == 2
+    uses = source.count("actions/attest-build-provenance@")
+    assert uses >= 1
+    assert source.count(pinned) == uses
 
 
 def test_rust_renderer_reuses_one_temp_style_file_for_json_reload():

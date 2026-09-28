@@ -9,7 +9,7 @@ on:
 jobs:
   lint:
     name: Lint and Type Check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
@@ -27,7 +27,7 @@ jobs:
 
   rust-lint:
     name: Rust Lint (clippy)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
@@ -52,7 +52,7 @@ jobs:
 
   test:
     name: Run Unit Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [lint]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -79,7 +79,7 @@ jobs:
 
   security:
     name: Security Scan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
@@ -104,7 +104,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             platform: linux-x64
           - os: ubuntu-24.04-arm
             platform: linux-arm64
@@ -142,7 +142,7 @@ jobs:
 
   smoke-test:
     name: Smoke Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: build-binary
     timeout-minutes: 5
     steps:
@@ -189,7 +189,7 @@ jobs:
 
   integration-test:
     name: Integration Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: build-binary
     timeout-minutes: 10
     steps:

@@ -22,9 +22,11 @@ ROOT = Path(__file__).resolve().parents[1]
 BIN_DIR = ROOT / "mlnative" / "bin"
 RUST_DIR = ROOT / "rust"
 
+# The binary is built on Ubuntu 24.04 runners and links their glibc (2.39),
+# ICU 74 and libjpeg 8, so the tag claims what those hosts provide.
 PLATFORM_TAGS = {
-    "x86_64": ("linux-x64", "manylinux_2_28_x86_64"),
-    "aarch64": ("linux-arm64", "manylinux_2_28_aarch64"),
+    "x86_64": ("linux-x64", "manylinux_2_39_x86_64"),
+    "aarch64": ("linux-arm64", "manylinux_2_39_aarch64"),
 }
 
 
