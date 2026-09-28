@@ -20,7 +20,7 @@ from typing import Any
 from .exceptions import MlnativeError
 
 DEFAULT_TIMEOUT = 30.0
-PROTOCOL_VERSION = "2.0"
+PROTOCOL_VERSION = "2.1"
 STDERR_BUFFER_LINES = 50
 MAX_BATCH_VIEWS = 128
 PATH_BINARY_OPT_IN_ENV = "MLNATIVE_USE_SYSTEM_BINARY"
@@ -208,6 +208,8 @@ class RenderDaemon:
                         pngs.append(payload[cursor:next_cursor])
                         cursor = next_cursor
                     response["pngs"] = pngs
+                elif "rgba_len" in response:
+                    response["rgba"] = self._read_exact(int(response["rgba_len"]))
 
                 self._responses.put(response)
         except EOFError:

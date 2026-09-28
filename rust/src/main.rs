@@ -1,15 +1,24 @@
 use maplibre_native::{
-    CameraUpdate, Image, ImageRenderer, ImageRendererBuilder, LatLng, RenderingError, Static,
+    CameraUpdate, Image, ImageRenderer, ImageRendererBuilder, LatLng, RenderingError, Size, Static,
 };
 use serde::{Deserialize, Serialize};
 use std::io::{self, BufRead, Seek, SeekFrom, Write};
 use std::num::NonZeroU32;
 use tempfile::NamedTempFile;
 
-const PROTOCOL_VERSION: &str = "2.0";
+const PROTOCOL_VERSION: &str = "2.1";
 
 fn default_pixel_ratio() -> f64 {
     1.0
+}
+
+/// What a render answers: an encoded PNG, or the raw RGBA buffer.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum Output {
+    #[default]
+    Png,
+    Rgba,
 }
 
 #[derive(Debug, Deserialize)]
@@ -35,6 +44,13 @@ enum Command {
         bearing: f64,
         #[serde(default)]
         pitch: f64,
+        /// Resize the map before this render; later renders keep the size.
+        #[serde(default)]
+        width: Option<u32>,
+        #[serde(default)]
+        height: Option<u32>,
+        #[serde(default)]
+        output: Output,
     },
     #[serde(rename = "render_batch")]
     RenderBatch { views: Vec<View> },
@@ -52,7 +68,7 @@ struct View {
     pitch: f64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default, Serialize)]
 struct Response {
     status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -60,12 +76,36 @@ struct Response {
     #[serde(skip_serializing_if = "Option::is_none")]
     png_lengths: Option<Vec<usize>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    rgba_len: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    width: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    height: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
+}
+
+impl Response {
+    fn ok() -> Self {
+        Self {
+            status: "ok".to_string(),
+            ..Self::default()
+        }
+    }
+
+    fn error(message: impl Into<String>) -> Self {
+        Self {
+            status: "error".to_string(),
+            error: Some(message.into()),
+            ..Self::default()
+        }
+    }
 }
 
 struct Renderer {
     renderer: Option<ImageRenderer<Static>>,
     temp_style_file: Option<NamedTempFile>,
+    size: Option<(u32, u32)>,
 }
 
 impl Renderer {
@@ -73,6 +113,7 @@ impl Renderer {
         Self {
             renderer: None,
             temp_style_file: None,
+            size: None,
         }
     }
 
@@ -125,6 +166,26 @@ impl Renderer {
         Self::load_style(&mut renderer, style, &mut self.temp_style_file)?;
 
         self.renderer = Some(renderer);
+        self.size = Some((width, height));
+        Ok(())
+    }
+
+    /// Resize the map when a render asks for another size.
+    fn resize(&mut self, width: Option<u32>, height: Option<u32>) -> Result<(), String> {
+        let (width, height) = match (width, height) {
+            (None, None) => return Ok(()),
+            (Some(width), Some(height)) if width > 0 && height > 0 => (width, height),
+            (Some(_), Some(_)) => return Err("width and height must be positive".to_string()),
+            _ => return Err("width and height go together".to_string()),
+        };
+        let renderer = self
+            .renderer
+            .as_mut()
+            .ok_or_else(|| "Renderer not initialized".to_string())?;
+        if self.size != Some((width, height)) {
+            renderer.set_map_size(Size { width, height });
+            self.size = Some((width, height));
+        }
         Ok(())
     }
 
@@ -155,19 +216,16 @@ impl Renderer {
     }
 
     fn reload_style(&mut self, style: &str) -> Result<(), Box<dyn std::error::Error>> {
-        let renderer = self
-            .renderer
-            .as_mut()
-            .ok_or("Renderer not initialized")?;
+        let renderer = self.renderer.as_mut().ok_or("Renderer not initialized")?;
 
         Self::load_style(renderer, style, &mut self.temp_style_file)
     }
 }
 
-fn encode_png(image: Image) -> Result<Vec<u8>, String> {
-    let img_buffer = image.as_image();
+fn encode_png(image: &Image) -> Result<Vec<u8>, String> {
     let mut png_bytes: Vec<u8> = Vec::new();
-    img_buffer
+    image
+        .as_image()
         .write_to(
             &mut std::io::Cursor::new(&mut png_bytes),
             image::ImageFormat::Png,
@@ -201,6 +259,34 @@ fn send_response_with_chunks<'a>(resp: &Response, chunks: impl IntoIterator<Item
     let _ = stdout.flush();
 }
 
+fn answer_image(image: &Image, output: Output) {
+    match output {
+        Output::Png => match encode_png(image) {
+            Ok(png_bytes) => send_response_with_payload(
+                &Response {
+                    png_len: Some(png_bytes.len()),
+                    ..Response::ok()
+                },
+                &png_bytes,
+            ),
+            Err(e) => send_response(&Response::error(e)),
+        },
+        Output::Rgba => {
+            let buffer = image.as_image();
+            let pixels = buffer.as_raw();
+            send_response_with_payload(
+                &Response {
+                    rgba_len: Some(pixels.len()),
+                    width: Some(buffer.width()),
+                    height: Some(buffer.height()),
+                    ..Response::ok()
+                },
+                pixels,
+            );
+        }
+    }
+}
+
 fn main() {
     let stdin = io::stdin();
     let mut renderer = Renderer::new();
@@ -218,12 +304,7 @@ fn main() {
         let cmd: Command = match serde_json::from_str(&line) {
             Ok(c) => c,
             Err(e) => {
-                send_response(&Response {
-                    status: "error".to_string(),
-                    png_len: None,
-                    png_lengths: None,
-                    error: Some(format!("Invalid command: {}", e)),
-                });
+                send_response(&Response::error(format!("Invalid command: {}", e)));
                 continue;
             }
         };
@@ -238,31 +319,16 @@ fn main() {
             } => {
                 if let Some(ref version) = protocol_version {
                     if version != PROTOCOL_VERSION {
-                        send_response(&Response {
-                            status: "error".to_string(),
-                            png_len: None,
-                            png_lengths: None,
-                            error: Some(format!(
-                                "Protocol version mismatch: client={}, daemon={}",
-                                version, PROTOCOL_VERSION
-                            )),
-                        });
+                        send_response(&Response::error(format!(
+                            "Protocol version mismatch: client={}, daemon={}",
+                            version, PROTOCOL_VERSION
+                        )));
                         continue;
                     }
                 }
                 match renderer.init(width, height, &style, pixel_ratio) {
-                    Ok(_) => send_response(&Response {
-                        status: "ok".to_string(),
-                        png_len: None,
-                        png_lengths: None,
-                        error: None,
-                    }),
-                    Err(e) => send_response(&Response {
-                        status: "error".to_string(),
-                        png_len: None,
-                        png_lengths: None,
-                        error: Some(format!("Init failed: {}", e)),
-                    }),
+                    Ok(_) => send_response(&Response::ok()),
+                    Err(e) => send_response(&Response::error(format!("Init failed: {}", e))),
                 }
             }
             Command::Render {
@@ -270,44 +336,22 @@ fn main() {
                 zoom,
                 bearing,
                 pitch,
-            } => match renderer.render(center, zoom, bearing, pitch) {
-                Ok(image) => match encode_png(image) {
-                    Ok(png_bytes) => send_response_with_payload(
-                        &Response {
-                            status: "ok".to_string(),
-                            png_len: Some(png_bytes.len()),
-                            png_lengths: None,
-                            error: None,
-                        },
-                        &png_bytes,
-                    ),
-                    Err(e) => send_response(&Response {
-                        status: "error".to_string(),
-                        png_len: None,
-                        png_lengths: None,
-                        error: Some(e),
-                    }),
-                },
-                Err(e) => send_response(&Response {
-                    status: "error".to_string(),
-                    png_len: None,
-                    png_lengths: None,
-                    error: Some(format!("Render failed: {}", e)),
-                }),
-            },
+                width,
+                height,
+                output,
+            } => {
+                if let Err(e) = renderer.resize(width, height) {
+                    send_response(&Response::error(format!("Resize failed: {}", e)));
+                    continue;
+                }
+                match renderer.render(center, zoom, bearing, pitch) {
+                    Ok(image) => answer_image(&image, output),
+                    Err(e) => send_response(&Response::error(format!("Render failed: {}", e))),
+                }
+            }
             Command::ReloadStyle { style } => match renderer.reload_style(&style) {
-                Ok(_) => send_response(&Response {
-                    status: "ok".to_string(),
-                    png_len: None,
-                    png_lengths: None,
-                    error: None,
-                }),
-                Err(e) => send_response(&Response {
-                    status: "error".to_string(),
-                    png_len: None,
-                    png_lengths: None,
-                    error: Some(format!("Reload style failed: {}", e)),
-                }),
+                Ok(_) => send_response(&Response::ok()),
+                Err(e) => send_response(&Response::error(format!("Reload style failed: {}", e))),
             },
             Command::RenderBatch { views } => {
                 let mut png_batches = Vec::with_capacity(views.len());
@@ -316,28 +360,19 @@ fn main() {
 
                 for view in views {
                     match renderer.render(view.center, view.zoom, view.bearing, view.pitch) {
-                        Ok(image) => match encode_png(image) {
+                        Ok(image) => match encode_png(&image) {
                             Ok(png_bytes) => {
                                 png_lengths.push(png_bytes.len());
                                 png_batches.push(png_bytes);
                             }
                             Err(_) => {
-                                error_response = Some(Response {
-                                    status: "error".to_string(),
-                                    png_len: None,
-                                    png_lengths: None,
-                                    error: Some("PNG encoding failed".to_string()),
-                                });
+                                error_response = Some(Response::error("PNG encoding failed"));
                                 break;
                             }
                         },
                         Err(e) => {
-                            error_response = Some(Response {
-                                status: "error".to_string(),
-                                png_len: None,
-                                png_lengths: None,
-                                error: Some(format!("Batch render failed: {}", e)),
-                            });
+                            error_response =
+                                Some(Response::error(format!("Batch render failed: {}", e)));
                             break;
                         }
                     }
@@ -348,10 +383,8 @@ fn main() {
                 } else {
                     send_response_with_chunks(
                         &Response {
-                            status: "ok".to_string(),
-                            png_len: None,
                             png_lengths: Some(png_lengths),
-                            error: None,
+                            ..Response::ok()
                         },
                         png_batches.iter().map(Vec::as_slice),
                     );
