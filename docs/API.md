@@ -345,3 +345,30 @@ Pre-built amalgam libraries
 ```
 
 The native renderer uses pre-built libraries with statically linked dependencies (ICU, libjpeg, libpng, etc.), eliminating system dependency issues.
+
+## Async API
+
+`AsyncRenderer` drives one renderer process from asyncio. Commands go over
+asyncio pipes, so a render in progress keeps no thread waiting.
+
+```python
+import asyncio
+from mlnative import AsyncRenderer
+
+async def main():
+    async with AsyncRenderer(512, 512, style) as renderer:
+        png = await renderer.render([12.49, 41.89], 11)
+        # Resize the process for this render and the next ones
+        png = await renderer.render([12.49, 41.89], 11, size=(800, 600))
+        # Raw pixels, without PNG encoding
+        raw = await renderer.render([12.49, 41.89], 11, output="rgba")
+        print(raw.width, raw.height, len(raw.data))
+
+asyncio.run(main())
+```
+
+An error the renderer answers raises `MlnativeError` and keeps the process.
+A process that exits, times out or is cancelled mid-command is stopped;
+create a new `AsyncRenderer` to continue, and call `aclose()` on the old one
+so its process is reaped. `pid` gives the process id while it runs, to watch
+its memory.
